@@ -7,6 +7,7 @@ from .models import Topic, TrainingTest, Question, TrainingTestTaker, TrainingTe
 from .serializers import (TrainingTestListSerializer, TrainingTestDetailSerializer, TopicSerializer,
                           PersonalCustomerTestsSerializer, CustomerAnswerSerializer,
                           TrainingTestCustomerRelationSerializer)
+from .tasks import send_test_result_to_customer
 
 
 class TopicList(ListAPIView):
@@ -137,8 +138,6 @@ class SubmitTest(GenericAPIView):
         training_test_taker.completed = True
         training_test_taker.save()
         print('preparing')
-        training_test_taker.customer.email_user(subject=test.name,
-                                                message=f'You completed the test {test} with a score of {score}',
-                                                from_email='quizzes@test.com')  # celery need
+        send_test_result_to_customer.delay(training_test_taker_id=training_test_taker.id, test_name=test.name, score=score)
         print('sending')
         return Response(self.get_serializer(test).data)
