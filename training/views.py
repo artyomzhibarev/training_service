@@ -5,7 +5,7 @@ from rest_framework.status import HTTP_412_PRECONDITION_FAILED
 
 from .models import Topic, TrainingTest, Question, TrainingTestTaker, TrainingTestCustomerRelation, Answer
 from .serializers import (TrainingTestListSerializer, TrainingTestDetailSerializer, TopicSerializer,
-                          PersonalCustomerTestsSerializer, CustomerAnswerSerializer, TrainingTestTakerSerializer,
+                          PersonalCustomerTestsSerializer, CustomerAnswerSerializer,
                           TrainingTestCustomerRelationSerializer)
 
 
@@ -79,14 +79,12 @@ class SaveCustomerAnswers(UpdateAPIView):
     permission_classes = (IsAuthenticated,)
 
     def update(self, request, *args, **kwargs):
-        trainingtesttaker_id = request.data.get('trainingtesttaker')
         question_id = request.data.get('question')
         answer_id = request.data.get('answer')
         customer = self.request.user
         slug = self.kwargs.get('slug')
         training_test = get_object_or_404(TrainingTest, slug=slug)
 
-        # training_test_taker = get_object_or_404(TrainingTestTaker, id=trainingtesttaker_id)
         training_test_taker = get_object_or_404(TrainingTestTaker, customer=customer, training_test=training_test)
 
         if training_test_taker.completed:
@@ -116,39 +114,31 @@ class SubmitTest(GenericAPIView):
     permission_classes = (IsAuthenticated,)
 
     def post(self, request, *args, **kwargs):
-        trainingtesttaker_id = request.data.get('trainingtesttaker')
-        question_id = request.data.get('question')
-        answer_id = request.data.get('answer')
         slug = self.kwargs.get('slug')
         test = TrainingTest.objects.get(slug=slug)
+        customer = self.request.user
 
-        training_test_taker = get_object_or_404(TrainingTestTaker, id=trainingtesttaker_id)
+        training_test_taker = get_object_or_404(TrainingTestTaker, customer=customer, training_test=test)
         if training_test_taker.completed:
             return Response({
                 "message": "This quiz is already complete. you can't submit again"},
                 status=HTTP_412_PRECONDITION_FAILED
             )
-
-        question = get_object_or_404(Question, id=question_id)
-        if answer_id is not None:
-            answer = get_object_or_404(Answer, id=answer_id)
-            obj = get_object_or_404(TrainingTestCustomerRelation, customer=training_test_taker, question=question)
-            obj.answer = answer
-            obj.save()
-        training_test_taker.completed = True
-
         correct_answers = 0
-        for users_answer in TrainingTestCustomerRelation.objects.filter(customer=training_test_taker,
-                                                                        question=question):
-            answer = Answer.objects.get(question=users_answer.question, is_correct=True)
-            if users_answer.answer == answer:
+        user_questions = training_test_taker.training_test.questions.all()
+        for question in user_questions:
+            answer_correct = question.answers.get(is_correct=True)
+            result = TrainingTestCustomerRelation.objects.get(customer=training_test_taker, question=question)
+            if answer_correct == result.answer:
                 correct_answers += 1
+
         score = int(correct_answers / training_test_taker.training_test.questions.count() * 100)
         training_test_taker.score = score
+        training_test_taker.completed = True
         training_test_taker.save()
         print('preparing')
         training_test_taker.customer.email_user(subject=test.name,
-                                                message=f'You completed the test with a score of {score}',
+                                                message=f'You completed the test {test} with a score of {score}',
                                                 from_email='quizzes@test.com')  # celery need
         print('sending')
         return Response(self.get_serializer(test).data)
